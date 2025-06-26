@@ -192,7 +192,7 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   return (
     <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
       <CardHeader>
-        <CardTitle className="text-2xl font-headline">Escáner inteligente</CardTitle>
+        <CardTitle className="text-2xl font-headline">Escáner inteligente 1</CardTitle>
         <CardDescription>Apunta tu cámara a un código de barras. Buscaremos el producto y la fecha de caducidad.</CardDescription>
       </CardHeader>
       <CardContent>
