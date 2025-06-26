@@ -6,6 +6,8 @@ interface ProductDetails {
   name: string | null;
   expiryDate: string | null;
   imageUrl: string | null;
+  errorType?: 'api' | 'ai' | 'network' | 'unknown';
+  errorMessage?: string;
 }
 
 export async function getProductDetailsFromScan(
@@ -18,9 +20,24 @@ export async function getProductDetailsFromScan(
       extractExpiryDate({ photoDataUri }),
     ]);
 
+    if (!expiryDateResult) {
+      return {
+        name: null,
+        expiryDate: null,
+        imageUrl: null,
+        errorType: 'ai',
+        errorMessage: 'No se pudo extraer la fecha de caducidad de la imagen.'
+      };
+    }
+
     if (!expiryDateResult?.expiryDate) {
-      console.log('No expiry date found.');
-      return null;
+      return {
+        name: null,
+        expiryDate: null,
+        imageUrl: null,
+        errorType: 'ai',
+        errorMessage: 'No se encontró ninguna fecha de caducidad en la imagen.'
+      };
     }
 
     let productName: string | null = `Product [${barcode}]`;
@@ -31,9 +48,23 @@ export async function getProductDetailsFromScan(
       if (productData.status === 1 && productData.product) {
         productName = productData.product.product_name || `Product [${barcode}]`;
         imageUrl = productData.product.image_front_url || null;
+      } else {
+        return {
+          name: null,
+          expiryDate: expiryDateResult.expiryDate,
+          imageUrl: null,
+          errorType: 'api',
+          errorMessage: 'El producto no se encuentra en la base de datos de OpenFoodFacts.'
+        };
       }
     } else {
-        console.log(`Failed to fetch product data for barcode: ${barcode}`);
+      return {
+        name: null,
+        expiryDate: expiryDateResult.expiryDate,
+        imageUrl: null,
+        errorType: 'network',
+        errorMessage: `Error de red al consultar OpenFoodFacts: ${productInfoResponse.status}`
+      };
     }
 
     return {
@@ -41,8 +72,13 @@ export async function getProductDetailsFromScan(
       expiryDate: expiryDateResult.expiryDate,
       imageUrl: imageUrl,
     };
-  } catch (error) {
-    console.error('Error in getProductDetailsFromScan:', error);
-    return null;
+  } catch (error: any) {
+    return {
+      name: null,
+      expiryDate: null,
+      imageUrl: null,
+      errorType: 'unknown',
+      errorMessage: error?.message || 'Error desconocido en el proceso de escaneo.'
+    };
   }
 }
