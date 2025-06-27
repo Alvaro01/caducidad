@@ -104,7 +104,7 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
         const result = await getProductDetailsFromScan(barcode, photoDataUri);
 
         if (result && result.name && result.expiryDate) {
-          onProductAdded({ name: result.name, expiryDate: result.expiryDate, imageUrl: result.imageUrl });
+          onProductAdded({ name: result.name, expiryDate: result.expiryDate, imageUrl: result.imageUrl || undefined, rawData: result.rawData });
           setScanFeedback({ message: `Añadido: ${result.name}`, timestamp: Date.now() });
           toast({
             title: "Producto añadido",

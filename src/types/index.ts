@@ -4,4 +4,5 @@ export interface Product {
   expiryDate: string; // YYYY-MM-DD format
   scanTimestamp: number;
   imageUrl?: string;
+  rawData?: any;
 }
