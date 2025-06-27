@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
+import Tesseract from 'tesseract.js';
 
 interface ProductScannerProps {
   onProductAdded: (product: Omit<Product, 'id' | 'scanTimestamp'>) => void;
@@ -36,6 +37,8 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [manualDate, setManualDate] = useState<string | null>(null);
+  const [step, setStep] = useState<'barcode' | 'confirm' | 'expiry-camera' | 'expiry-ocr' | 'expiry-manual'>('barcode');
+  const [expiryPhoto, setExpiryPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     if (scanFeedback) {
@@ -93,14 +96,12 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     return Math.random() > 0.5 ? '2025-12-31' : null;
   };
 
-  // Cuando se escanea un producto
+  // Paso 1: Escaneo de código de barras
   const processBarcode = (barcode: string) => {
     if (isProcessingRef.current || !videoRef.current || !canvasRef.current || !videoRef.current.srcObject || !videoRef.current.played.length) {
       return;
     }
-
     isProcessingRef.current = true;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
     canvas.width = video.videoWidth;
@@ -110,15 +111,12 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
       isProcessingRef.current = false;
       return;
     }
-
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const photoDataUri = canvas.toDataURL('image/jpeg');
-
     startTransition(async () => {
       try {
         const result = await getProductDetailsFromScan(barcode, photoDataUri);
         if (result && result.name) {
-          // Guardamos el producto sin fecha
           const raw = result.rawData || {};
           const product = {
             name: result.name,
@@ -135,19 +133,7 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
             rawData: result.rawData
           };
           setProductInProcess(product);
-          setIsProcessingOCR(true);
-          setOcrError(null);
-          // Inicia OCR
-          const fecha = await fakeOCR(result.imageUrl || '');
-          setIsProcessingOCR(false);
-          if (fecha) {
-            // Guardar producto automáticamente
-            guardarProductoEnBD({ ...product, expiryDate: fecha });
-            setScanFeedback({ message: `Añadido: ${result.name}`, timestamp: Date.now() });
-            resetearFlujo();
-          } else {
-            setOcrError('No se detectó una fecha válida. Introduce la fecha manualmente.');
-          }
+          setStep('confirm');
         } else {
           toast({
             variant: 'destructive',
@@ -164,10 +150,51 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     });
   };
 
+  // Paso 2: Captura de foto de la fecha de caducidad
+  const handleCaptureExpiryPhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const photoDataUri = canvas.toDataURL('image/jpeg');
+    setExpiryPhoto(photoDataUri);
+    setStep('expiry-ocr');
+    setIsProcessingOCR(true);
+    setOcrError(null);
+    // Inicia OCR real
+    ocrDetectExpiryDate(photoDataUri);
+  };
+
+  // OCR real con Tesseract.js
+  const ocrDetectExpiryDate = async (imageUrl: string) => {
+    try {
+      const { data: { text } } = await Tesseract.recognize(imageUrl, 'spa');
+      // Busca una fecha en el texto reconocido
+      const match = text.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
+      setIsProcessingOCR(false);
+      if (match) {
+        guardarProductoEnBD({ ...productInProcess, expiryDate: match[0].replace(/\//g, '-') });
+        setScanFeedback({ message: `Añadido: ${productInProcess.name}`, timestamp: Date.now() });
+        resetearFlujo();
+      } else {
+        setOcrError('No se detectó una fecha válida. Introduce la fecha manualmente.');
+        setStep('expiry-manual');
+      }
+    } catch (e) {
+      setIsProcessingOCR(false);
+      setOcrError('Error en el OCR. Introduce la fecha manualmente.');
+      setStep('expiry-manual');
+    }
+  };
+
   // Guardar producto (por ahora solo console.log)
   const guardarProductoEnBD = (producto: any) => {
     console.log('Producto guardado:', producto);
-    onProductAdded(producto); // Para que se vea en la lista
+    onProductAdded(producto);
     toast({ title: 'Producto guardado', description: producto.name });
   };
 
@@ -186,6 +213,8 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     setManualDate(null);
     setOcrError(null);
     setIsProcessingOCR(false);
+    setStep('barcode');
+    setExpiryPhoto(null);
   };
 
   useEffect(() => {
@@ -234,12 +263,12 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   }, [hasCameraPermission, isDetectorSupported, productInProcess]);
 
   // Renderizado condicional según el estado del flujo
-  if (productInProcess) {
+  if (step === 'confirm' && productInProcess) {
     return (
       <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="text-2xl font-headline">Confirmar producto</CardTitle>
-          <CardDescription>Revisa los datos y la fecha de caducidad</CardDescription>
+          <CardDescription>Revisa los datos y pulsa para escanear la fecha de caducidad</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center gap-4">
@@ -260,15 +289,57 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
                 <p className="text-xs text-blue-600 underline"><a href={productInProcess.url} target="_blank" rel="noopener noreferrer">Ver en OpenFoodFacts</a></p>
               )}
             </div>
+            <Button onClick={() => setStep('expiry-camera')}>Escanear fecha de caducidad</Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (step === 'expiry-camera') {
+    return (
+      <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-2xl font-headline">Escanea la fecha de caducidad</CardTitle>
+          <CardDescription>Enfoca la fecha y pulsa capturar</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center gap-4">
+            <video ref={videoRef} className={cn('w-full h-48 object-cover rounded border')} autoPlay muted playsInline />
+            <Button onClick={handleCaptureExpiryPhoto}>Capturar</Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (step === 'expiry-ocr') {
+    return (
+      <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-2xl font-headline">Procesando fecha...</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center gap-4">
+            {expiryPhoto && <img src={expiryPhoto} alt="Foto de fecha" className="w-32 h-32 object-cover rounded" />}
             {isProcessingOCR && <p className="text-sm text-muted-foreground">Buscando fecha de caducidad automáticamente...</p>}
             {ocrError && <p className="text-sm text-red-500">{ocrError}</p>}
-            {/* Si el OCR falla, muestra el calendario */}
-            {ocrError && (
-              <div className="flex flex-col items-center gap-2">
-                <Calendar mode="single" selected={manualDate ? new Date(manualDate) : undefined} onSelect={date => { setManualDate(date ? date.toISOString().split('T')[0] : null); handleManualDate(date); }} initialFocus />
-                <p className="text-xs text-muted-foreground">Selecciona la fecha de caducidad</p>
-              </div>
-            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (step === 'expiry-manual') {
+    return (
+      <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-2xl font-headline">Introduce la fecha manualmente</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center gap-2">
+            <Calendar mode="single" selected={manualDate ? new Date(manualDate) : undefined} onSelect={date => { setManualDate(date ? date.toISOString().split('T')[0] : null); handleManualDate(date); }} initialFocus />
+            <p className="text-xs text-muted-foreground">Selecciona la fecha de caducidad</p>
           </div>
         </CardContent>
       </Card>
