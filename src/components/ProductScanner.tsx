@@ -39,6 +39,8 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   const [manualDate, setManualDate] = useState<string | null>(null);
   const [step, setStep] = useState<'barcode' | 'confirm' | 'expiry-camera' | 'expiry-ocr' | 'expiry-manual'>('barcode');
   const [expiryPhoto, setExpiryPhoto] = useState<string | null>(null);
+  const [expiryAttempts, setExpiryAttempts] = useState(0);
+  const MAX_EXPIRY_ATTEMPTS = 5;
 
   useEffect(() => {
     if (scanFeedback) {
@@ -169,25 +171,17 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     ocrDetectExpiryDate(photoDataUri);
   };
 
-  // OCR real con Tesseract.js
+  // OCR real con Tesseract.js (devuelve la fecha o null)
   const ocrDetectExpiryDate = async (imageUrl: string) => {
     try {
       const { data: { text } } = await Tesseract.recognize(imageUrl, 'spa');
-      // Busca una fecha en el texto reconocido
       const match = text.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
-      setIsProcessingOCR(false);
       if (match) {
-        guardarProductoEnBD({ ...productInProcess, expiryDate: match[0].replace(/\//g, '-') });
-        setScanFeedback({ message: `Añadido: ${productInProcess.name}`, timestamp: Date.now() });
-        resetearFlujo();
-      } else {
-        setOcrError('No se detectó una fecha válida. Introduce la fecha manualmente.');
-        setStep('expiry-manual');
+        return match[0].replace(/\//g, '-');
       }
+      return null;
     } catch (e) {
-      setIsProcessingOCR(false);
-      setOcrError('Error en el OCR. Introduce la fecha manualmente.');
-      setStep('expiry-manual');
+      return null;
     }
   };
 
@@ -207,7 +201,7 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     resetearFlujo();
   };
 
-  // Resetear el flujo
+  // Resetear el flujo (añadir reset de intentos)
   const resetearFlujo = () => {
     setProductInProcess(null);
     setManualDate(null);
@@ -215,7 +209,49 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     setIsProcessingOCR(false);
     setStep('barcode');
     setExpiryPhoto(null);
+    setExpiryAttempts(0);
   };
+
+  // Escaneo automático de fecha de caducidad
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    let isUnmounted = false;
+    const scanExpiryLoop = async () => {
+      if (step !== 'expiry-camera' || !videoRef.current || !canvasRef.current || !productInProcess) return;
+      setIsProcessingOCR(true);
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const photoDataUri = canvas.toDataURL('image/jpeg');
+      const fecha = await ocrDetectExpiryDate(photoDataUri);
+      if (isUnmounted) return;
+      if (fecha) {
+        setIsProcessingOCR(false);
+        guardarProductoEnBD({ ...productInProcess, expiryDate: fecha });
+        setScanFeedback({ message: `Añadido: ${productInProcess.name}`, timestamp: Date.now() });
+        resetearFlujo();
+      } else {
+        setExpiryAttempts(prev => prev + 1);
+      }
+    };
+    if (step === 'expiry-camera' && expiryAttempts < MAX_EXPIRY_ATTEMPTS) {
+      intervalId = setInterval(scanExpiryLoop, 2000);
+      scanExpiryLoop(); // Primer intento inmediato
+    }
+    if (step === 'expiry-camera' && expiryAttempts >= MAX_EXPIRY_ATTEMPTS) {
+      setIsProcessingOCR(false);
+      setOcrError('No se detectó una fecha válida. Introduce la fecha manualmente.');
+      setStep('expiry-manual');
+    }
+    return () => {
+      isUnmounted = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [step, expiryAttempts, productInProcess]);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -301,12 +337,12 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
       <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="text-2xl font-headline">Escanea la fecha de caducidad</CardTitle>
-          <CardDescription>Enfoca la fecha y pulsa capturar</CardDescription>
+          <CardDescription>Enfoca la fecha, la detección es automática</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center gap-4">
             <video ref={videoRef} className={cn('w-full h-48 object-cover rounded border')} autoPlay muted playsInline />
-            <Button onClick={handleCaptureExpiryPhoto}>Capturar</Button>
+            {isProcessingOCR && <p className="text-sm text-muted-foreground">Buscando fecha de caducidad automáticamente... (Intento {expiryAttempts + 1}/{MAX_EXPIRY_ATTEMPTS})</p>}
           </div>
         </CardContent>
       </Card>
