@@ -48,20 +48,19 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   }, [scanFeedback]);
 
   useEffect(() => {
+    let stream: MediaStream | null = null;
     async function setupScanner() {
       if (!('BarcodeDetector' in window)) {
-        console.error('Barcode Detector is not supported by this browser.');
         setIsDetectorSupported(false);
         setHasCameraPermission(false);
         return;
       }
-
       if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
         setHasCameraPermission(false);
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         setHasCameraPermission(true);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -69,25 +68,26 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
         // @ts-ignore
         barcodeDetectorRef.current = new window.BarcodeDetector({ formats: ['ean_13', 'upc_a', 'upc_e', 'ean_8'] });
       } catch (error) {
-        console.error('Error accessing camera:', error);
         setHasCameraPermission(false);
         toast({
           variant: 'destructive',
           title: 'Camera Access Denied',
-          description: 'Please enable camera permissions to use the scanner.',
+          description: 'Por favor, activa los permisos de cámara.'
         });
       }
     }
 
-    setupScanner();
+    if (step === 'barcode' || step === 'expiry-camera') {
+      setupScanner();
+    }
 
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
+      // Solo detenemos la cámara si salimos del flujo de escaneo completamente
+      if (stream && (step !== 'barcode' && step !== 'expiry-camera')) {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [toast]);
+  }, [step, toast]);
 
   // Simulación de OCR (reemplaza esto por tu llamada real a Tesseract.js)
   const fakeOCR = async (imageUrl: string) => {
