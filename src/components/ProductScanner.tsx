@@ -8,6 +8,8 @@ import type { Product } from '@/types';
 import { getProductDetailsFromScan } from '@/app/actions';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
 
 interface ProductScannerProps {
   onProductAdded: (product: Omit<Product, 'id' | 'scanTimestamp'>) => void;
@@ -28,6 +30,12 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [isDetectorSupported, setIsDetectorSupported] = useState(true);
   const [scanFeedback, setScanFeedback] = useState<{ message: string; timestamp: number } | null>(null);
+
+  // Nuevo estado para el flujo moderno
+  const [productInProcess, setProductInProcess] = useState<any>(null); // producto escaneado sin fecha
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [manualDate, setManualDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (scanFeedback) {
@@ -78,7 +86,14 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     };
   }, [toast]);
 
+  // Simulación de OCR (reemplaza esto por tu llamada real a Tesseract.js)
+  const fakeOCR = async (imageUrl: string) => {
+    // Simula un OCR que falla el 50% de las veces
+    await new Promise(res => setTimeout(res, 1500));
+    return Math.random() > 0.5 ? '2025-12-31' : null;
+  };
 
+  // Cuando se escanea un producto
   const processBarcode = (barcode: string) => {
     if (isProcessingRef.current || !videoRef.current || !canvasRef.current || !videoRef.current.srcObject || !videoRef.current.played.length) {
       return;
@@ -102,12 +117,11 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
     startTransition(async () => {
       try {
         const result = await getProductDetailsFromScan(barcode, photoDataUri);
-
-        if (result && result.name && result.expiryDate) {
+        if (result && result.name) {
+          // Guardamos el producto sin fecha
           const raw = result.rawData || {};
-          onProductAdded({
+          const product = {
             name: result.name,
-            expiryDate: result.expiryDate,
             imageUrl: result.imageUrl || undefined,
             brand: raw.brands || undefined,
             quantity: raw.quantity || undefined,
@@ -119,80 +133,96 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
             barcode: raw.code || undefined,
             url: raw.url || undefined,
             rawData: result.rawData
-          });
-          setScanFeedback({ message: `Añadido: ${result.name}`, timestamp: Date.now() });
-          toast({
-            title: "Producto añadido",
-            description: `${result.name} (caduca: ${result.expiryDate}) ha sido añadido.`,
-          });
-        } else if (result && result.errorType) {
-          let title = "Fallo en el escaneo";
-          let description = result.errorMessage || "No se pudo extraer la información.";
-          description = String(description);
-          if (!description) description = "No se pudo extraer la información.";
-          if (result.errorType === 'ai') {
-            title = "Error de IA";
-          } else if (result.errorType === 'api') {
-            title = "Producto no encontrado";
-          } else if (result.errorType === 'network') {
-            title = "Error de red";
-          } else if (result.errorType === 'unknown') {
-            title = "Error desconocido";
+          };
+          setProductInProcess(product);
+          setIsProcessingOCR(true);
+          setOcrError(null);
+          // Inicia OCR
+          const fecha = await fakeOCR(result.imageUrl || '');
+          setIsProcessingOCR(false);
+          if (fecha) {
+            // Guardar producto automáticamente
+            guardarProductoEnBD({ ...product, expiryDate: fecha });
+            setScanFeedback({ message: `Añadido: ${result.name}`, timestamp: Date.now() });
+            resetearFlujo();
+          } else {
+            setOcrError('No se detectó una fecha válida. Introduce la fecha manualmente.');
           }
-          toast({
-            variant: 'destructive',
-            title,
-            description,
-          });
         } else {
           toast({
             variant: 'destructive',
-            title: "Fallo en el escaneo",
-            description: "No se pudo extraer toda la información. Intenta de nuevo.",
+            title: 'Fallo en el escaneo',
+            description: 'No se pudo extraer toda la información. Intenta de nuevo.',
           });
         }
       } catch (error) {
-        console.error("Scanning failed", error);
-        toast({ variant: 'destructive', title: "Error", description: "Ocurrió un error inesperado." });
+        console.error('Scanning failed', error);
+        toast({ variant: 'destructive', title: 'Error', description: 'Ocurrió un error inesperado.' });
       } finally {
         isProcessingRef.current = false;
       }
     });
   };
 
+  // Guardar producto (por ahora solo console.log)
+  const guardarProductoEnBD = (producto: any) => {
+    console.log('Producto guardado:', producto);
+    onProductAdded(producto); // Para que se vea en la lista
+    toast({ title: 'Producto guardado', description: producto.name });
+  };
+
+  // Cuando el usuario selecciona fecha manualmente
+  const handleManualDate = (date: Date | undefined) => {
+    if (!date || !productInProcess) return;
+    const fechaISO = date.toISOString().split('T')[0];
+    guardarProductoEnBD({ ...productInProcess, expiryDate: fechaISO });
+    setScanFeedback({ message: `Añadido: ${productInProcess.name}`, timestamp: Date.now() });
+    resetearFlujo();
+  };
+
+  // Resetear el flujo
+  const resetearFlujo = () => {
+    setProductInProcess(null);
+    setManualDate(null);
+    setOcrError(null);
+    setIsProcessingOCR(false);
+  };
+
   useEffect(() => {
     let animationFrameId: number;
 
-    const scanLoop = async () => {
-      if (
-        videoRef.current &&
-        barcodeDetectorRef.current &&
-        !isProcessingRef.current &&
-        videoRef.current.readyState >= 4 &&
-        videoRef.current.videoWidth > 0
-      ) {
-        try {
-          const barcodes = await barcodeDetectorRef.current.detect(videoRef.current);
-          if (barcodes.length > 0) {
-            const detectedBarcode = barcodes[0].rawValue;
-            const now = Date.now();
-            const lastScanTime = recentlyScannedRef.current.get(detectedBarcode);
+    if (!productInProcess) {
+      const scanLoop = async () => {
+        if (
+          videoRef.current &&
+          barcodeDetectorRef.current &&
+          !isProcessingRef.current &&
+          videoRef.current.readyState >= 4 &&
+          videoRef.current.videoWidth > 0
+        ) {
+          try {
+            const barcodes = await barcodeDetectorRef.current.detect(videoRef.current);
+            if (barcodes.length > 0) {
+              const detectedBarcode = barcodes[0].rawValue;
+              const now = Date.now();
+              const lastScanTime = recentlyScannedRef.current.get(detectedBarcode);
 
-            if (!lastScanTime || (now - lastScanTime > BARCODE_COOLDOWN_MS)) {
-              recentlyScannedRef.current.set(detectedBarcode, now);
-              processBarcode(detectedBarcode);
+              if (!lastScanTime || (now - lastScanTime > BARCODE_COOLDOWN_MS)) {
+                recentlyScannedRef.current.set(detectedBarcode, now);
+                processBarcode(detectedBarcode);
+              }
             }
+          } catch (e) {
+            console.error('Barcode detection failed: ', e);
           }
-        } catch (e) {
-          console.error('Barcode detection failed: ', e);
         }
+
+        animationFrameId = requestAnimationFrame(scanLoop);
+      };
+
+      if (hasCameraPermission && isDetectorSupported) {
+        animationFrameId = requestAnimationFrame(scanLoop);
       }
-
-      animationFrameId = requestAnimationFrame(scanLoop);
-    };
-
-    if (hasCameraPermission && isDetectorSupported) {
-      animationFrameId = requestAnimationFrame(scanLoop);
     }
 
     return () => {
@@ -201,8 +231,49 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasCameraPermission, isDetectorSupported]);
+  }, [hasCameraPermission, isDetectorSupported, productInProcess]);
 
+  // Renderizado condicional según el estado del flujo
+  if (productInProcess) {
+    return (
+      <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-2xl font-headline">Confirmar producto</CardTitle>
+          <CardDescription>Revisa los datos y la fecha de caducidad</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center gap-4">
+            {productInProcess.imageUrl && (
+              <img src={productInProcess.imageUrl} alt={productInProcess.name} className="w-32 h-32 object-cover rounded" />
+            )}
+            <div className="text-center">
+              <p className="font-bold text-lg">{productInProcess.name}</p>
+              {productInProcess.brand && <p className="text-xs text-gray-500">Marca: {productInProcess.brand}</p>}
+              {productInProcess.quantity && <p className="text-xs text-gray-500">Cantidad: {productInProcess.quantity}</p>}
+              {productInProcess.categories && <p className="text-xs text-gray-500">Categorías: {productInProcess.categories}</p>}
+              {productInProcess.nutriscore && <p className="text-xs text-gray-500">Nutriscore: {productInProcess.nutriscore.toUpperCase()}</p>}
+              {productInProcess.ecoscore && <p className="text-xs text-gray-500">Ecoscore: {productInProcess.ecoscore.toUpperCase()}</p>}
+              {productInProcess.ingredients && <p className="text-xs text-gray-500">Ingredientes: {productInProcess.ingredients}</p>}
+              {productInProcess.country && <p className="text-xs text-gray-500">País: {productInProcess.country}</p>}
+              {productInProcess.barcode && <p className="text-xs text-gray-500">Código de barras: {productInProcess.barcode}</p>}
+              {productInProcess.url && (
+                <p className="text-xs text-blue-600 underline"><a href={productInProcess.url} target="_blank" rel="noopener noreferrer">Ver en OpenFoodFacts</a></p>
+              )}
+            </div>
+            {isProcessingOCR && <p className="text-sm text-muted-foreground">Buscando fecha de caducidad automáticamente...</p>}
+            {ocrError && <p className="text-sm text-red-500">{ocrError}</p>}
+            {/* Si el OCR falla, muestra el calendario */}
+            {ocrError && (
+              <div className="flex flex-col items-center gap-2">
+                <Calendar mode="single" selected={manualDate ? new Date(manualDate) : undefined} onSelect={date => { setManualDate(date ? date.toISOString().split('T')[0] : null); handleManualDate(date); }} initialFocus />
+                <p className="text-xs text-muted-foreground">Selecciona la fecha de caducidad</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="shadow-lg bg-card/80 backdrop-blur-sm">
