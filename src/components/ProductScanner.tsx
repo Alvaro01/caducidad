@@ -104,7 +104,22 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
         const result = await getProductDetailsFromScan(barcode, photoDataUri);
 
         if (result && result.name && result.expiryDate) {
-          onProductAdded({ name: result.name, expiryDate: result.expiryDate, imageUrl: result.imageUrl || undefined, rawData: result.rawData });
+          const raw = result.rawData || {};
+          onProductAdded({
+            name: result.name,
+            expiryDate: result.expiryDate,
+            imageUrl: result.imageUrl || undefined,
+            brand: raw.brands || undefined,
+            quantity: raw.quantity || undefined,
+            categories: raw.categories || undefined,
+            nutriscore: raw.nutriscore_grade || undefined,
+            ecoscore: raw.ecoscore_grade || undefined,
+            ingredients: raw.ingredients_text || undefined,
+            country: raw.countries || undefined,
+            barcode: raw.code || undefined,
+            url: raw.url || undefined,
+            rawData: result.rawData
+          });
           setScanFeedback({ message: `Añadido: ${result.name}`, timestamp: Date.now() });
           toast({
             title: "Producto añadido",

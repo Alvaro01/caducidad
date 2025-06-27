@@ -96,6 +96,17 @@ export function ProductList({ products, onDeleteProduct }: ProductListProps) {
                             <p className="text-sm text-muted-foreground">
                               {isDateValid ? `Caduca el ${format(expiryDate, 'dd MMM yyyy')}` : 'Fecha de caducidad inválida'}
                             </p>
+                            {product.brand && <p className="text-xs text-gray-500">Marca: {product.brand}</p>}
+                            {product.quantity && <p className="text-xs text-gray-500">Cantidad: {product.quantity}</p>}
+                            {product.categories && <p className="text-xs text-gray-500">Categorías: {product.categories}</p>}
+                            {product.nutriscore && <p className="text-xs text-gray-500">Nutriscore: {product.nutriscore.toUpperCase()}</p>}
+                            {product.ecoscore && <p className="text-xs text-gray-500">Ecoscore: {product.ecoscore.toUpperCase()}</p>}
+                            {product.ingredients && <p className="text-xs text-gray-500">Ingredientes: {product.ingredients}</p>}
+                            {product.country && <p className="text-xs text-gray-500">País: {product.country}</p>}
+                            {product.barcode && <p className="text-xs text-gray-500">Código de barras: {product.barcode}</p>}
+                            {product.url && (
+                              <p className="text-xs text-blue-600 underline"><a href={product.url} target="_blank" rel="noopener noreferrer">Ver en OpenFoodFacts</a></p>
+                            )}
                           </div>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -122,13 +133,6 @@ export function ProductList({ products, onDeleteProduct }: ProductListProps) {
                             </TooltipContent>
                           </Tooltip>
                         </div>
-                        {/* Apartado de depuración: mostrar nombre y url de la imagen del JSON si existen */}
-                        {product.rawData && (
-                          <div className="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-700 border border-gray-200">
-                            <div><strong>Nombre JSON:</strong> {product.rawData.product_name || '-'}</div>
-                            <div><strong>URL imagen JSON:</strong> {product.rawData.image_front_url || '-'}</div>
-                          </div>
-                        )}
                       </div>
                     </CardContent>
                   </Card>
