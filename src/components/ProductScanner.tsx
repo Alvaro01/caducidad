@@ -175,7 +175,9 @@ export function ProductScanner({ onProductAdded }: ProductScannerProps) {
   const ocrDetectExpiryDate = async (imageUrl: string) => {
     try {
       const { data: { text } } = await Tesseract.recognize(imageUrl, 'spa');
-      const match = text.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
+      console.log('Texto OCR:', text); // Log para depuración
+      // Regex mejorado: detecta fechas con año de 2 o 4 dígitos
+      const match = text.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
       if (match) {
         return match[0].replace(/\//g, '-');
       }
