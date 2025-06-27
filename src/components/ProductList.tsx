@@ -122,6 +122,13 @@ export function ProductList({ products, onDeleteProduct }: ProductListProps) {
                             </TooltipContent>
                           </Tooltip>
                         </div>
+                        {/* Apartado de depuración: mostrar nombre y url de la imagen del JSON si existen */}
+                        {product.rawData && (
+                          <div className="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-700 border border-gray-200">
+                            <div><strong>Nombre JSON:</strong> {product.rawData.product_name || '-'}</div>
+                            <div><strong>URL imagen JSON:</strong> {product.rawData.image_front_url || '-'}</div>
+                          </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
